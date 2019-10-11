@@ -1,0 +1,156 @@
+---
+title: "Jak głosowali posłowie"
+author: "Adam Gabriel Dobrakowski"
+date: "3 października 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# path to the main folder:
+PATH <- "~/Projekt sejm/"
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(ggrepel)
+```
+
+
+```{r}
+load(paste0(PATH, "voting_table.rda"))
+poslowie <- rownames(table_mat)
+```
+
+
+Najpierw wczytajmy pliki z listami posłów z poszczególnych partii.
+
+```{r}
+## membership
+membership <- data.frame(posel = poslowie, partia = rep("", length(poslowie)), stringsAsFactors = FALSE)
+rownames(membership) <- membership$posel
+memberships <- c("pis", "po", "kukiz", "konfederacja", "wis", "teraz", "niezrzeszeni", "psl")
+for(p in memberships) {
+  members <- read.table(paste0("~/Projekt sejm/membership/", p), sep = ",")
+  membership[as.character(unlist(members)), 2] <- p
+}
+
+# we keep only recent members
+membership <- membership[membership$partia != "",]
+
+table_mat <- table_mat[membership$posel,]
+dim(table_mat)
+```
+
+Teraz możemy wykonać analizę głównych składowych.
+```{r}
+pca <- prcomp(table_mat)
+
+plot_data <- cbind(as.data.frame(pca$x[, 1:2]), partia = as.factor(membership$partia), posel = membership$posel)
+
+#label_data <- subset(plot_data, posel %in%
+#                       c("KACZYŃSKI JAROSŁAW", "BASZKO MIECZYSŁAW KAZIMIERZ"))
+
+ggplot(plot_data, aes(x = -plot_data[,1], y = plot_data[,2], colour = partia)) + geom_point(size=2) +
+  xlab(element_blank()) + ylab(element_blank())
+```
+
+Widzimy, że, zgodnie z oczekiwaniami, PiS i PO leżą po przeciwnych stronach. PSL jest bardzo blisko PO:
+
+```{r}
+party_representation <- cbind(as.data.frame(pca$x[,1:2]), party = membership$partia)
+party_mean <- party_representation %>% group_by(party) %>% summarise(PC1 = mean(PC1), PC2 = mean(PC2))
+party_mean <- data.frame(party_mean)
+ggplot(party_mean, aes(x = -party_mean[,2], y = party_mean[,3], colour = party_mean$party)) +
+  
+  geom_point(size=5) + geom_label_repel(data = party_mean, aes(x = -party_mean[,2], y = party_mean[,3]), label =
+                                                                     party_mean$party, size = 3) +
+theme(legend.position = "none")
+# może dodać linie z odległościami?
+```
+
+Policzmy średnie głosy w partiach i odległości pomiędzy partiami.
+
+```{r}
+mean_party_votes <- party_representation %>% group_by(party) %>% summarise(PC1 = mean(PC1), PC2 = mean(PC2))
+party_mean <- data.frame(party_mean)
+```
+
+
+Dalej przyda się nam tabelka odległości między posłami. Będziemy liczyć odległości w korelacjach.
+
+```{r}
+D <- cor(t(table_mat))
+```
+
+Sprawdźmy teraz, które partie są najbardziej jednolite w głosach.
+
+```{r}
+library(kableExtra)
+
+in_party_variance <- sapply(memberships, function(p) {
+  members <- membership$posel[membership$partia == p]
+  mean(D[members,members])
+})
+mean_agreement <- cbind(partia = memberships, średnia_zgodność = round(in_party_variance, 2))
+kable(mean_agreement[order(mean_agreement[,2]),], row.names = FALSE)
+```
+
+Rozkład odległości w PiS.
+```{r}
+for(p in memberships) {
+  members <- membership$posel[membership$partia == p]
+  hist(D[members, members], breaks = 500, main = paste0("Odległości w parii ", p))
+}
+```
+
+
+
+```{r}
+
++ geom_label_repel(data = plot_data,
+                                                                   aes(x = -plot_data[,1], y = plot_data[,2]), label =
+                                                                     plot_data$posel, size = 2)
+
+d <- as.matrix(dist(pca$x[,1:2]))
+d.pis <- d[membership$partia == "pis", membership$partia == "po"]
+
+
+library(Rtsne)
+tsne <- Rtsne(table_mat, dims = 2, initial_dims = 7985, check_duplicates=FALSE, verbose=TRUE, max_iter = 300)
+plot_data <- cbind(as.data.frame(tsne$Y), partia = as.factor(etykiety), posel = plot_posel)
+ggplot(plot_data, aes(plot_data[,1], plot_data[,2], colour = membership$partia)) + geom_point(size=2)
+
+# Odległości między posłami
+D <- apply(table_mat, 1, function(v) {
+  apply(table_mat, 1, function(u) {
+    sum(v == u) / ncol(table_mat)
+  })
+})
+a <- D["MOSKAL KAZIMIERZ",]
+
+# wewnątrz pis
+D_pis <- D[membership$partia == "pis", membership$partia == "pis"]
+sort(apply(D_pis, 1, mean))
+
+trzon_pis <- names(a[a > 0.95])
+min(D[trzon_pis,trzon_pis])
+
+# pis - po
+D_pis_po <- D[membership$partia == "pis", membership$partia == "po"]
+sort(apply(D_pis_po, 1, mean), decreasing = TRUE)[1:10]
+
+sort(apply(D_pis_po, 2, mean))
+
+plot_data1 <- plot_data[membership$partia == "pis",]
+label_data <- subset(plot_data1, posel %in%
+                       trzon_pis)
+ggplot(plot_data1, aes(x = -plot_data1[,1], y = plot_data1[,2])) + geom_point(size=4) +
+  xlab(element_blank()) + ylab(element_blank()) + geom_label_repel(data = label_data,
+                                                                   aes(x = -label_data[,1], y = label_data[,2]), label =
+                                                                     label_data$posel, size = 3)
+
+```
+
