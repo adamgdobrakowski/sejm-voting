@@ -2,4 +2,5 @@
 # Jak głosowali posłowie w minionej kadencji?
 
 Tutaj znajdziemy analizę:
-1. [Raport](https://htmlpreview.github.io/?https%3A%2F%2Fgithub.com%2Fadamgdobrakowski%2Fsejm-voting%2Fblob%2Fmaster%2FSkrypty+R%2Fpodsumowanie.html)
+1. [Raport](http://htmlpreview.github.io/?https://github.com/adamgdobrakowski/sejm-voting/blob/master/Skrypty%20R/podsumowanie.html)
+
