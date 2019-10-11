@@ -1,0 +1,181 @@
+---
+title: "Głosowania sejmu okiem statystyka"
+author: "Adam Gabriel Dobrakowski"
+date: "11 października 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, error = FALSE, warning = FALSE)
+```
+
+W ostatniej kadencji sejmu przeprowadzono ponad 8 tysięcy głosowań. Bezpośrednia analiza wyników jest trudnym zadaniem, nawet dla osoby posiadającej wyrobioną opinię w wielu sprawach. Jednak dzięki narzędziom statystyki matematycznej możemy od razu spojrzeć na wszystkie głosowania na raz i wyciągnąć z nich wnioski!
+
+```{r}
+# path to the main folder:
+PATH <- "~/Projekt sejm/sejm-voting/"
+```
+
+```{r, include=FALSE}
+library(dplyr)
+library(ggplot2)
+library(ggrepel)
+```
+
+
+```{r}
+load(paste0(PATH, "voting_table.rda"))
+poslowie <- rownames(table_mat)
+```
+
+```{r}
+## PARTIE
+membership <- data.frame(posel = poslowie, partia = rep("", length(poslowie)), stringsAsFactors = FALSE)
+rownames(membership) <- membership$posel
+parties <- c("pis", "po", "kukiz", "konfederacja", "wis", "teraz", "niezrzeszeni", "psl")
+for(p in parties) {
+  members <- read.table(paste0(PATH, "Partie/", p), sep = ",")
+  membership[as.character(unlist(members)), 2] <- p
+}
+
+# we keep only recent members
+membership <- membership[membership$partia != "",]
+
+table_mat <- table_mat[membership$posel,]
+#dim(table_mat)
+```
+
+Rzutowanie posłów poszczególnych partii na płaszczyznę (za pomocą PCA) -- każda kropka odpowiada jednemu posłowi:
+
+```{r}
+pca <- prcomp(table_mat)
+
+plot_data <- cbind(as.data.frame(pca$x[, 1:2]), partia = as.factor(membership$partia), posel = membership$posel)
+
+#label_data <- subset(plot_data, posel %in%
+#                       c("KACZYŃSKI JAROSŁAW", "BASZKO MIECZYSŁAW KAZIMIERZ"))
+
+ggplot(plot_data, aes(x = -plot_data[,1], y = plot_data[,2], colour = partia)) + geom_point(size=2) +
+  xlab(element_blank()) + ylab(element_blank())
+```
+
+Widzimy, że, zgodnie z oczekiwaniami, PiS i PO leżą po przeciwnych stronach. PSL jest bardzo blisko PO.
+
+Drugi wykres przedstawia reprezentacje partii (jako średnią wszystkich posłów):
+
+```{r}
+party_representation <- cbind(as.data.frame(pca$x[,1:2]), party = membership$partia)
+party_mean <- party_representation %>% group_by(party) %>% summarise(PC1 = mean(PC1), PC2 = mean(PC2))
+party_mean <- data.frame(party_mean)
+ggplot(party_mean, aes(x = -party_mean[,2], y = party_mean[,3], colour = party_mean$party)) +
+  
+  geom_point(size=5) + geom_label_repel(data = party_mean, aes(x = -party_mean[,2], y = party_mean[,3]), label =
+                                                                     party_mean$party, size = 3) +
+theme(legend.position = "none")
+# może dodać linie z odległościami?
+```
+
+```{r}
+D <- cor(t(table_mat))
+```
+
+Sprawdźmy teraz, które partie są najbardziej jednolite w głosach:
+
+```{r}
+library(kableExtra)
+
+in_party_variance <- sapply(parties, function(p) {
+  members <- membership$posel[membership$partia == p]
+  mean(D[members,members])
+})
+mean_agreement <- cbind(partia = parties, średnia_zgodność = round(in_party_variance, 2))
+kable(mean_agreement[order(mean_agreement[,2]),], row.names = FALSE)
+```
+
+```{r}
+# Odległości między posłami
+D <- apply(table_mat, 1, function(v) {
+  apply(table_mat, 1, function(u) {
+    sum(v == u) / ncol(table_mat)
+  })
+})
+```
+
+
+Możemy z łatwością policzyć, którzy posłowie PiS-u mają największą zbieżność w głosowaniach z politykami PO:
+
+```{r}
+
+# pis - po
+D_pis_po <- D[membership$partia == "pis", membership$partia == "po"]
+max_pis_po <- sort(apply(D_pis_po, 1, mean), decreasing = TRUE)[1:10]
+kable(data.frame("średnia zgodność z PO" = round(max_pis_po, 3)))
+#sort(apply(D_pis_po, 2, mean))
+```
+
+```{r}
+po <- cbind(PC1 = party_mean[party_mean$party == "po",2],
+             PC2 = party_mean[party_mean$party == "po",3],
+             partia = "po",
+             posel = "PO średnia")
+plot_data2 <- rbind(plot_data[plot_data$posel %in% names(max_pis_po),], po)
+
+party_representation <- cbind(as.data.frame(pca$x[,1:2]), party = membership$partia)
+party_mean <- party_representation %>% group_by(party) %>% summarise(PC1 = mean(PC1), PC2 = mean(PC2))
+party_mean <- data.frame(party_mean)
+ggplot(plot_data2, aes(x = -as.numeric(plot_data2[,1]), y = as.numeric(plot_data2[,2]), colour = plot_data2$partia)) +
+  geom_point(size=5) + geom_label_repel(data = plot_data2, aes(x = -as.numeric(plot_data2[,1]), y = as.numeric(plot_data2[,2])), label = plot_data2$posel, size = 3) +
+theme(legend.position = "none")
+```
+
+Średnia zgodność z PO dla wszystkich polityków PiS-u to `r round(mean(apply(D_pis_po, 1, mean)), 3)` (zgodność dla prezesa Jarosława Kaczyńskiego to:  `r round(apply(D_pis_po, 1, mean)["KACZYŃSKI JAROSŁAW"], 3)`).
+
+
+I odwrotnie -- posłowie PO:
+
+```{r}
+max_po_pis <- sort(apply(D_pis_po, 2, mean), decreasing = TRUE)[1:20]
+kable(data.frame("średnia zgodność z PiS" = round(max_po_pis, 3)))
+```
+
+```{r}
+pis <- cbind(PC1 = party_mean[party_mean$party == "pis",2],
+             PC2 = party_mean[party_mean$party == "pis",3],
+             partia = "pis",
+             posel = "PiS średnia")
+plot_data2 <- rbind(plot_data[plot_data$posel %in% names(max_po_pis),], pis)
+
+party_representation <- cbind(as.data.frame(pca$x[,1:2]), party = membership$partia)
+party_mean <- party_representation %>% group_by(party) %>% summarise(PC1 = mean(PC1), PC2 = mean(PC2))
+party_mean <- data.frame(party_mean)
+ggplot(plot_data2, aes(x = -as.numeric(plot_data2[,1]), y = as.numeric(plot_data2[,2]), colour = plot_data2$partia)) +
+  geom_point(size=5) + geom_label_repel(data = plot_data2, aes(x = -as.numeric(plot_data2[,1]), y = as.numeric(plot_data2[,2])), label = plot_data2$posel, size = 3) +
+theme(legend.position = "none")
+```
+
+Jak widać, nie ma tutaj wyróżniających się osób.
+
+Na koniec, posłowie najbliżsi dla p. Jarosława Kaczyńskiego:
+
+```{r}
+D_prezes <- D["KACZYŃSKI JAROSŁAW",]
+max_prezes <- sort(D_prezes, decreasing = TRUE)[1:10]
+kable(data.frame("średnia zgodność z prezesem" = round(max_prezes, 3)))
+```
+
+```{r}
+prezes <- cbind(PC1 = party_mean["KACZYŃSKI JAROSŁAW",2],
+             PC2 = party_mean["KACZYŃSKI JAROSŁAW",3],
+             partia = "pis",
+             posel = "KACZYŃSKI JAROSŁAW")
+plot_data2 <- rbind(plot_data[plot_data$posel %in% names(max_prezes),], pis, prezes)
+
+party_representation <- cbind(as.data.frame(pca$x[,1:2]), party = membership$partia)
+party_mean <- party_representation %>% group_by(party) %>% summarise(PC1 = mean(PC1), PC2 = mean(PC2))
+party_mean <- data.frame(party_mean)
+ggplot(plot_data2, aes(x = -as.numeric(plot_data2[,1]), y = as.numeric(plot_data2[,2]))) +
+  geom_point(size=5) + geom_label_repel(data = plot_data2, aes(x = -as.numeric(plot_data2[,1]), y = as.numeric(plot_data2[,2])), label = plot_data2$posel, size = 3) +
+theme(legend.position = "none")
+```
+
+
